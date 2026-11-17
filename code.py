@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, roc_auc_score
 
-# EDA and Data Cleaning
+# EDA & DATA CLEANING
 
 df = pd.read_excel("abc_store_sales.xlsx")
  

@@ -8,10 +8,10 @@ import plotly.graph_objects as go
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.metrics import roc_auc_score, r2_score
 
-# --- PAGE CONFIG ---
+# PAGE CONFIG
 st.set_page_config(page_title="PricePilot", layout="wide", page_icon="logo2.png")
 
-# --- SAFE CSS FOR LAYOUT & GRADIENT ---
+# CSS
 st.markdown("""
 <style>
     [data-testid="stAppViewContainer"] {
@@ -35,7 +35,7 @@ st.markdown("""
 
 FEAT = ["log_price", "log_cp", "is_promo", "is_holiday", "is_peak_season"]
 
-# --- LOGO — 60% width, centered ---
+# LOGO
 if os.path.exists("logo.png"):
     logo_left, logo_center, logo_right = st.columns([1, 3, 1])
     with logo_center:
@@ -46,7 +46,7 @@ else:
 st.markdown("<br>", unsafe_allow_html=True)
 
 
-# --- 1. DATA CLEANING ---
+# DATA CLEANING
 @st.cache_data(show_spinner=False)
 def load(raw):
     df = pd.read_excel(io.BytesIO(raw))
@@ -72,7 +72,7 @@ def prep(d):
     return d
 
 
-# --- BOOTSTRAP CIs (With Anti-Explosion Fix) ---
+# BOOTSTRAP CIs
 @st.cache_data(show_spinner=False)
 def bootstrap_cis(raw_bytes, product, prices_list, comp, cost, promo, hol, peak, n_iter=500, seed=42):
     df_b = load(raw_bytes)
@@ -81,7 +81,6 @@ def bootstrap_cis(raw_bytes, product, prices_list, comp, cost, promo, hol, peak,
     logi_train = train
     reg_train  = train[(train["bought"] == 1) & (train["quantity"] > 0)]
 
-    # Cap quantity to prevent mathematical explosions during bootstrap
     max_qty_seen = reg_train["quantity"].max() if len(reg_train) > 0 else 10
 
     prices_arr    = np.array(prices_list)
@@ -124,7 +123,6 @@ def bootstrap_cis(raw_bytes, product, prices_list, comp, cost, promo, hol, peak,
 
         prob = b_lm.predict_proba(X)[:, 1]
         
-        # Clip the raw quantity so it cannot explode to infinity
         raw_qty = np.exp(b_rm.predict(X)) * b_smear
         qty = prob * np.clip(raw_qty, 0, max_qty_seen * 3)
         
@@ -157,7 +155,7 @@ def bootstrap_cis(raw_bytes, product, prices_list, comp, cost, promo, hol, peak,
     return pd.DataFrame(rows)
 
 
-# --- BULLETPROOF UPLOADER ---
+# UPLOADER
 st.sidebar.markdown("### 📁 Data Source")
 up = st.sidebar.file_uploader("Upload Excel", type=["xlsx"])
 if up is None:
@@ -166,7 +164,7 @@ if up is None:
 
 df = load(up.getvalue())
 
-# --- DETECT PRODUCT NAME COLUMN (for banner) ---
+# PRODUCT NAME COLUMN
 name_col = None
 for candidate in ["product_name", "product", "name", "Product Name", "Product", "Name"]:
     if candidate in df.columns:
@@ -182,7 +180,7 @@ def product_display(pid):
     except Exception:
         return f"Product ID: {pid}"
 
-# --- SIDEBAR INPUTS ---
+# INPUTS
 st.sidebar.markdown("### 📦 Product Details")
 product = st.sidebar.selectbox("Select Product", sorted(df["product_id"].unique()))
 p = df[df["product_id"] == product]
@@ -201,7 +199,7 @@ peak  = int(pd.Timestamp(date).month in [11, 12])
 obj_label = st.sidebar.radio("Optimize For", ["Revenue", "Demand"], horizontal=True)
 obj = "expected_revenue" if obj_label == "Revenue" else "expected_quantity"
 
-# --- GUARDRAILS ---
+# GUARDRAILS
 with st.sidebar.expander("🛡️ Guardrails", expanded=True):
     g_ceiling = st.number_input(
         "Absolute Price Ceiling",
@@ -215,7 +213,7 @@ with st.sidebar.expander("🛡️ Guardrails", expanded=True):
     g_conv   = st.number_input("Min Conversion Rate %", 0.0, 100.0, 2.0, 0.5)
     g_elas   = st.number_input("Max Elasticity SE", 0.0, 100.0, 5.0, 0.1)
 
-# --- PIPELINE ---
+# PIPELINE
 with st.status("⚙️ Initializing Pricing Engine...", expanded=True) as status:
     st.write("📊 Step 1: Preparing features and splitting historical data...")
     base = prep(p.sort_values("date"))
@@ -247,7 +245,6 @@ with st.status("⚙️ Initializing Pricing Engine...", expanded=True) as status
 
     st.write("🔮 Step 5: Running price simulations...")
     
-    # --- MATCHES YOUR NEW CODE.PY LOGIC EXACTLY ---
     price_change_pct = 15
     price_step = price * 0.025
     min_price = price * (1 - price_change_pct / 100)
@@ -330,7 +327,7 @@ with st.status("⚙️ Initializing Pricing Engine...", expanded=True) as status
     sim = sim.sort_values(by=["sort_order", obj], ascending=[True, False]).drop(columns=["sort_order"])
     status.update(label="✅ Pipeline Complete!", state="complete", expanded=False)
 
-# --- DISPLAY METRICS ---
+# DISPLAY
 st.markdown("### 📊 Model Performance")
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Logistic AUC", f"{auc:.2f}" if auc > 0 else "—")
@@ -338,12 +335,11 @@ c2.metric("Regression R²", f"{r2:.2f}")
 c3.metric("Price Elasticity", f"{elasticity:.2f}")
 c4.metric("Elasticity Std. Error", f"{elasticity_se:.2f}")
 
-# --- DISPLAY CHART (Dynamic 1-Line Chart) ---
+# DISPLAY GRAPH
 st.markdown("### 📈 Simulation Results")
 
 fig = go.Figure()
 
-# Determine which data to plot based on user selection
 if obj == "expected_revenue":
     ci_lo = "rev_ci_lower"
     ci_hi = "rev_ci_upper"
@@ -353,10 +349,8 @@ else:
     ci_hi = "demand_ci_upper"
     trace_name = "Expected Demand"
 
-# --- THE FIX: Sort the dataframe by price so Plotly draws left-to-right ---
 plot_df = sim.dropna(subset=[ci_lo, ci_hi]).sort_values("candidate_price")
 
-# 1. Bootstrap Shadow (Light Blue)
 fig.add_trace(go.Scatter(
     x=plot_df["candidate_price"], y=plot_df[ci_hi],
     mode="lines", line=dict(width=0), hoverinfo="skip", showlegend=False
@@ -368,18 +362,16 @@ fig.add_trace(go.Scatter(
     showlegend=False, name="95% CI"
 ))
 
-# 2. Main Line (Dark Green)
 fig.add_trace(go.Scatter(
     x=plot_df["candidate_price"], y=plot_df[obj],
     name=trace_name, mode="lines+markers",
     line=dict(color="#0B5A44", width=3), marker=dict(size=6)
 ))
 
-# Current Price vertical line
 fig.add_vline(x=price, line_dash="dot", line_color="#E74C3C",
               annotation_text="Current Price", annotation_font_color="#111111")
 
-# Layout & Theme
+# THEME AND LAYOUT
 fig.update_layout(
     plot_bgcolor="#FFFFFF",
     paper_bgcolor="#FFFFFF",
@@ -403,13 +395,12 @@ fig.update_layout(
     margin=dict(l=20, r=20, t=40, b=20),
 )
 
-# Lock zoom
 fig.update_xaxes(fixedrange=True)
 fig.update_yaxes(fixedrange=True)
 st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 
-# --- ADOPT BANNER ---
+# ADOPT BANNER
 st.markdown("### 🎯 Final Recommendations")
 
 adopt_rows = sim[sim["recommendation"] == "ADOPT"]
@@ -444,7 +435,7 @@ else:
     )
     st.markdown(no_adopt_html, unsafe_allow_html=True)
 
-# --- FINAL TABLE ---
+# FINAL TABLE
 display_df = sim[["candidate_price", obj, "gross_margin_pct", "recommendation"]].copy()
 
 rename_dict = {
